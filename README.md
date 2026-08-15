@@ -36,7 +36,7 @@ pipx install .
 # uv tool install .
 ```
 
-La primera ejecución descarga CLAP y AST (~1 GB) a la cache del usuario (`~/.cache/sound-analyzer` o `%LOCALAPPDATA%\sound-analyzer`).
+La primera ejecución descarga los modelos de IA a la cache del usuario (unos **3 GB**, una sola vez, para todos los bancos). En macOS: `~/Library/Caches/sound-analyzer/`. En Linux: `~/.cache/sound-analyzer/`. En Windows: `%LOCALAPPDATA%\sound-analyzer\`.
 
 ## Uso
 
@@ -71,20 +71,63 @@ Sin instalar:
 python -m sound_analyzer index ./assets
 ```
 
-## Qué se escribe en el banco
+## Dónde se guarda (y qué borrar para liberar espacio)
+
+Hay tres sitios distintos. `index` no llena el disco igual que `organize`. Los mp3/wav originales no se mueven ni se duplican al indexar.
 
 ```text
 Banco/
   1001/                 originales (intactos)
   1002/
-  .sound-analyzer/      índice SQLite + embeddings
-  organized/
+  .sound-analyzer/      índice de ESTE banco (SQLite + embeddings)
+  organized/            solo si corriste organize --apply
     animals/dogs/
-    impacts/metal/
+    ambience/city/
     review/             confianza baja
 ```
 
-`organize` usa hardlink si el disco lo permite (no duplica GB) y extrae WAV nuevos solo cuando un CD track se partió en varios sonidos.
+### 1. Índice de cada banco (pequeño)
+
+Dentro de **esa** carpeta de sonidos: `Banco/.sound-analyzer/catalog.sqlite`.
+
+Ahí está el inventario, clips, tags y embeddings. Si copias el banco a un USB, esta carpeta viaja con él. Suele ser unos MB, no GB.
+
+Borrar `.sound-analyzer/` **no borra los sonidos**. Solo olvida el análisis. La próxima vez hay que volver a `index`.
+
+### 2. Modelos de IA (lo gordo, una vez por máquina)
+
+No están dentro del banco. Cache del usuario:
+
+| SO | Ruta |
+| --- | --- |
+| macOS | `~/Library/Caches/sound-analyzer/` |
+| Linux | `~/.cache/sound-analyzer/` |
+| Windows | `%LOCALAPPDATA%\sound-analyzer\` |
+
+Unos **3 GB** (CLAP + AudioSet). Se descargan la primera vez y se reutilizan para todos los bancos.
+
+Si los borras, `index` los vuelve a bajar. No toca tus sonidos.
+
+### 3. `organized/` (opcional, puede ser grande)
+
+Solo existe si hiciste `organize --apply`. Es la vista por categorías. Los originales siguen donde estaban.
+
+`organize` usa hardlink si el disco lo permite (casi no duplica GB) y extrae WAV nuevos solo cuando un CD track se partió en varios sonidos.
+
+`sound-analyzer undo /ruta/banco` borra lo de `organized/`. Los CDs originales no se tocan.
+
+Un archivo va a **una sola carpeta**: la categoría con más puntuación. El segundo tag (por ejemplo city dentro de ambience) es subcarpeta: `organized/ambience/city/`. El buscador lo encuentra igual aunque no esté en esa carpeta.
+
+### Qué borrar para liberar espacio
+
+| Quieres… | Borra |
+| --- | --- |
+| Quitar el análisis de un banco y repetirlo luego | `/tu/banco/.sound-analyzer/` |
+| Quitar las carpetas organizadas | `/tu/banco/organized/` o `sound-analyzer undo /tu/banco` |
+| Recuperar ~3 GB de modelos (se redescargan) | cache de la tabla de arriba |
+| Desinstalar la tool de este repo | la carpeta `.venv` del proyecto |
+
+**No borres** los mp3/wav originales. Eso es la librería, no el índice. El código (`src/`) es pequeño.
 
 ## Dispositivo
 
