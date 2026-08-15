@@ -108,6 +108,84 @@ class ClipRow:
         return self.start_sec <= 0.02 and (self.end_sec >= (self.duration_ms / 1000.0) - 0.08)
 
 
+@dataclass(frozen=True)
+class ClipView:
+    """A clip together with the file it comes from, read in a single join."""
+
+    clip: ClipRow
+    file: FileRow
+
+
+SORTS: dict[str, str] = {
+    "name": "COALESCE(NULLIF(clips.suggested_name, ''), files.relpath) ASC, clips.start_sec ASC",
+    "path": "files.relpath ASC, clips.start_sec ASC",
+    "short": "clips.duration_ms ASC, files.relpath ASC",
+    "long": "clips.duration_ms DESC, files.relpath ASC",
+    "recent": "files.mtime DESC, files.relpath ASC",
+    "confidence": "clips.confidence IS NULL, clips.confidence DESC, files.relpath ASC",
+}
+
+_CLIP_VIEW_COLUMNS = """
+    clips.*,
+    files.relpath AS relpath,
+    files.id AS file_row_id,
+    files.size AS file_size,
+    files.mtime AS file_mtime,
+    files.duration AS file_duration,
+    files.sample_rate AS file_sample_rate,
+    files.channels AS file_channels,
+    files.codec AS file_codec
+"""
+
+
+def _like_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _browse_filters(
+    *,
+    category: str | None,
+    subcategory: str | None,
+    folder: str | None,
+    text: str | None,
+    min_duration: float | None,
+    max_duration: float | None,
+) -> tuple[str, list[Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if category:
+        clauses.append("clips.category = ?")
+        params.append(category)
+    if subcategory:
+        clauses.append("clips.subcategory = ?")
+        params.append(subcategory)
+    if folder:
+        prefix = folder.replace("\\", "/").strip("/")
+        if prefix:
+            clauses.append("files.relpath LIKE ? ESCAPE '\\'")
+            params.append(f"{_like_escape(prefix)}/%")
+    if text and text.strip():
+        needle = f"%{_like_escape(text.strip().lower())}%"
+        clauses.append(
+            "("
+            "LOWER(COALESCE(clips.suggested_name, '')) LIKE ? ESCAPE '\\'"
+            " OR LOWER(files.relpath) LIKE ? ESCAPE '\\'"
+            " OR LOWER(COALESCE(clips.tags_json, '')) LIKE ? ESCAPE '\\'"
+            " OR LOWER(COALESCE(clips.category, '')) LIKE ? ESCAPE '\\'"
+            " OR LOWER(COALESCE(clips.subcategory, '')) LIKE ? ESCAPE '\\'"
+            ")"
+        )
+        params.extend([needle] * 5)
+    if min_duration is not None:
+        clauses.append("clips.duration_ms >= ?")
+        params.append(int(min_duration * 1000))
+    if max_duration is not None:
+        clauses.append("clips.duration_ms <= ?")
+        params.append(int(max_duration * 1000))
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return where, params
+
+
 class Catalog:
     def __init__(self, library: Path):
         self.library = library.resolve()
@@ -336,6 +414,128 @@ class Catalog:
             "tagged": tagged,
             "organized": organized,
         }
+
+    def category_tree(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """
+            SELECT category, subcategory, COUNT(*) AS total
+            FROM clips
+            WHERE category IS NOT NULL AND category != ''
+            GROUP BY category, subcategory
+            ORDER BY category ASC, total DESC
+            """
+        ).fetchall()
+        tree: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            entry = tree.setdefault(row["category"], {"name": row["category"], "count": 0, "subcategories": []})
+            entry["count"] += int(row["total"])
+            if row["subcategory"]:
+                entry["subcategories"].append({"name": row["subcategory"], "count": int(row["total"])})
+        return sorted(tree.values(), key=lambda item: -item["count"])
+
+    def folders(self) -> list[dict[str, Any]]:
+        """Top-level folders of the bank, with clip counts."""
+        rows = self.conn.execute(
+            """
+            SELECT
+                CASE
+                    WHEN instr(files.relpath, '/') > 0
+                    THEN substr(files.relpath, 1, instr(files.relpath, '/') - 1)
+                    ELSE ''
+                END AS folder,
+                COUNT(*) AS total
+            FROM clips JOIN files ON files.id = clips.file_id
+            GROUP BY folder
+            ORDER BY folder ASC
+            """
+        ).fetchall()
+        return [
+            {"name": row["folder"] or ".", "path": row["folder"], "count": int(row["total"])}
+            for row in rows
+        ]
+
+    def query_clips(
+        self,
+        *,
+        category: str | None = None,
+        subcategory: str | None = None,
+        folder: str | None = None,
+        text: str | None = None,
+        min_duration: float | None = None,
+        max_duration: float | None = None,
+        sort: str = "name",
+        limit: int = 60,
+        offset: int = 0,
+    ) -> list[ClipView]:
+        where, params = _browse_filters(
+            category=category,
+            subcategory=subcategory,
+            folder=folder,
+            text=text,
+            min_duration=min_duration,
+            max_duration=max_duration,
+        )
+        order = SORTS.get(sort, SORTS["name"])
+        rows = self.conn.execute(
+            f"""
+            SELECT {_CLIP_VIEW_COLUMNS}
+            FROM clips JOIN files ON files.id = clips.file_id
+            {where}
+            ORDER BY {order}
+            LIMIT ? OFFSET ?
+            """,
+            [*params, max(0, int(limit)), max(0, int(offset))],
+        ).fetchall()
+        return [self._clip_view_from_row(row) for row in rows]
+
+    def count_clips(
+        self,
+        *,
+        category: str | None = None,
+        subcategory: str | None = None,
+        folder: str | None = None,
+        text: str | None = None,
+        min_duration: float | None = None,
+        max_duration: float | None = None,
+    ) -> int:
+        where, params = _browse_filters(
+            category=category,
+            subcategory=subcategory,
+            folder=folder,
+            text=text,
+            min_duration=min_duration,
+            max_duration=max_duration,
+        )
+        row = self.conn.execute(
+            f"SELECT COUNT(*) FROM clips JOIN files ON files.id = clips.file_id {where}",
+            params,
+        ).fetchone()
+        return int(row[0])
+
+    def get_clip_view(self, clip_id: int) -> ClipView | None:
+        row = self.conn.execute(
+            f"""
+            SELECT {_CLIP_VIEW_COLUMNS}
+            FROM clips JOIN files ON files.id = clips.file_id
+            WHERE clips.id = ?
+            """,
+            (clip_id,),
+        ).fetchone()
+        return self._clip_view_from_row(row) if row else None
+
+    @classmethod
+    def _clip_view_from_row(cls, row: sqlite3.Row) -> ClipView:
+        file = FileRow(
+            id=int(row["file_row_id"]),
+            relpath=row["relpath"],
+            size=int(row["file_size"]),
+            mtime=float(row["file_mtime"]),
+            duration=row["file_duration"],
+            sample_rate=row["file_sample_rate"],
+            channels=row["file_channels"],
+            codec=row["file_codec"],
+        )
+        return ClipView(clip=cls._clip_from_row(row), file=file)
 
     @staticmethod
     def _file_from_row(row: sqlite3.Row) -> FileRow:

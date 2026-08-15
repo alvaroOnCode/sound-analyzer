@@ -60,7 +60,7 @@ Comandos sueltos:
 | `tag` | Categoría + tags AudioSet/CLAP + nombre sugerido |
 | `index` | scan + segment + embed + tag |
 | `search` | Búsqueda semántica en todo el banco (`--folder` para acotar, `--ref` por audio) |
-| `ui` | Buscador local en el navegador |
+| `ui` | Buscador y reproductor local en el navegador |
 | `organize` | Copia/hardlink a `organized/{categoria}/{subcategoria}/` |
 | `undo` | Borra lo generado en `organized/` |
 | `status` | Resumen del índice |
@@ -70,6 +70,22 @@ Sin instalar:
 ```bash
 python -m sound_analyzer index ./assets
 ```
+
+## La interfaz web
+
+```bash
+sound-analyzer ui -l "/ruta/Hollywood Edge"          # abre http://127.0.0.1:7860
+sound-analyzer ui -l "/ruta/banco" --port 8000 --no-browser
+```
+
+Servidor local (FastAPI) sin subir nada a ningún sitio. Tiene dos modos:
+
+- **Explorar**: filas por categoría y por carpeta, con la forma de onda de cada sonido como portada. El lateral lista categorías, subcategorías y carpetas del banco.
+- **Buscar**: la barra de arriba hace búsqueda semántica sobre todo el banco (la primera consulta carga CLAP y tarda). El botón *Referencia* busca por parecido con un audio tuyo.
+
+Cada resultado enseña tags, duración, origen y datos técnicos, y suena en el reproductor de abajo, que permite hacer clic en la onda para saltar. Atajos: `/` busca, `espacio` reproduce o pausa, `↑`/`↓` recorren la lista, `enter` reproduce y `esc` sale del campo de texto.
+
+El sistema de diseño está en [docs/DESIGN.md](docs/DESIGN.md) y los tokens viven en `web/static/css/tokens.css`. Si cambias colores o tamaños, cámbialos primero ahí.
 
 ## Dónde se guarda (y qué borrar para liberar espacio)
 
