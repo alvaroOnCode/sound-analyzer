@@ -195,13 +195,14 @@ def search(
 @app.command()
 def ui(
     library: Path = typer.Option(Path("."), "--library", "-l", help="Carpeta del banco."),
-    port: int = typer.Option(7860, "--port", help="Puerto local de Gradio."),
+    port: int = typer.Option(7860, "--port", help="Puerto local del servidor."),
+    no_browser: bool = typer.Option(False, "--no-browser", help="No abrir el navegador al arrancar."),
 ) -> None:
     """Abre el buscador local en el navegador."""
     from sound_analyzer.ui import launch_ui
 
     path = _library_arg(library)
-    launch_ui(path, port=port)
+    launch_ui(path, port=port, open_browser=not no_browser)
 
 
 @app.command()
