@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sound-analyzer"
+version = "0.1.0"
+description = "Indexa, busca y organiza librerías de SFX en local con modelos gratuitos."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12",
+    "rich>=13",
+    "numpy>=1.26",
+    "platformdirs>=4.2",
+    "soundfile>=0.12",
+    "librosa>=0.10",
+    "torch>=2.2",
+    "torchaudio>=2.2",
+    "transformers>=4.40",
+    "gradio>=4.44",
+    "huggingface-hub>=0.23",
+]
+
+[project.scripts]
+sound-analyzer = "sound_analyzer.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sound_analyzer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

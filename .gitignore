@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.sound-analyzer/
+.DS_Store
+dist/
+build/
+.python-version
+*.npy
+.cache/
+assets/
+organized/
+.pytest_cache/
